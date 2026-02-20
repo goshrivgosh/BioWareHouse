@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  minio-initialization:
+    image: minio/mc:latest
+    container_name: minio-initialization
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Waiting for MinIO...';
+        until mc alias set minio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} 2>/dev/null; do
+          echo '   MinIO not ready yet...';
+          sleep 2;
+        done;
+        mc mb minio/${MINIO_BUCKET1} --ignore-existing;
+        mc mb minio/${MINIO_BUCKET2} --ignore-existing;
+        mc mb minio/${MINIO_BUCKET3} --ignore-existing;
+        mc admin config set minio notify_postgres:stage-minio connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=dbstud port=${POSTGRES_PORT}\" table=\"stage_raw_minio_objects\" format=\"access\";
+        mc admin config set minio notify_postgres:ods-minio connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=dbstud port=${POSTGRES_PORT}\" table=\"ods_raw_minio_objects\" format=\"namespace\";
+        mc event remove minio/raw-vcf-files --force 2>/dev/null || true;
+        mc event add minio/raw-vcf-files arn:minio:sqs::stage-minio:postgresql --event put,delete,get;
+        mc event add minio/raw-vcf-files arn:minio:sqs::ods-minio:postgresql --event put,delete,get;
+      "
+    restart: on-failure
+
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    ports:
+      - "8124:8123"
+      - "9003:9000"
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    restart: unless-stopped
+
+  airflow:
+    image: apache/airflow:2.10.3-python3.11
+    container_name: airflow
+    ports:
+      - "8081:8080"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../airflow/scripts:/opt/airflow/scripts
+      - ../airflow/plugins:/opt/airflow/plugins
+      - ../airflow/requirements.txt:/opt/airflow/requirements.txt
+      - ../airflow/airflow.db:/opt/airflow/airflow.db
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW_USER: ${AIRFLOW_USER}
+      AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD}
+      AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_SEC: "600"
+      AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: "1800"
+    command: >
+      bash -c "
+        airflow db init &&
+        pip install --no-cache-dir -r /opt/airflow/requirements.txt &&
+        (airflow users list | grep -q ${AIRFLOW_USER} 2>/dev/null || 
+         airflow users create --username ${AIRFLOW_USER} --password ${AIRFLOW_PASSWORD} --firstname Admin --lastname User --role Admin --email admin@example.com) &&
+        airflow webserver & 
+        airflow scheduler
+      "
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+    name: ${MINIO_VOLUME_NAME:-minio_data}
+  clickhouse_data:
+    name: ${CLICKHOUSE_VOLUME_NAME:-clickhouse_data}

@@ -1,6 +1,25 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -21,6 +40,7 @@ services:
     container_name: minio-initialization
     depends_on:
       - minio
+      - postgres   # добавлено, чтобы дождаться postgres перед настройкой уведомлений
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -36,11 +56,11 @@ services:
         mc mb minio/parquet-files --ignore-existing;
         mc mb minio/sandbox --ignore-existing;
       
-        mc admin config set minio notify_postgres:stage-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=dbstud port=${POSTGRES_PORT}\" table=\"stage_vcf_object\" format=\"access\";
-        mc admin config set minio notify_postgres:ods-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=dbstud port=${POSTGRES_PORT}\" table=\"ods_vcf_object\" format=\"namespace\";
+        mc admin config set minio notify_postgres:stage-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"stage_vcf_object\" format=\"access\";
+        mc admin config set minio notify_postgres:ods-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"ods_vcf_object\" format=\"namespace\";
       
-        mc admin config set minio notify_postgres:stage-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=dbstud port=${POSTGRES_PORT}\" table=\"stage_parquet_object\" format=\"access\";
-        mc admin config set minio notify_postgres:ods-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=dbstud port=${POSTGRES_PORT}\" table=\"ods_parquet_object\" format=\"namespace\";
+        mc admin config set minio notify_postgres:stage-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"stage_parquet_object\" format=\"access\";
+        mc admin config set minio notify_postgres:ods-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"ods_parquet_object\" format=\"namespace\";
       
         mc admin service restart minio;
       
@@ -54,7 +74,6 @@ services:
         mc event add minio/parquet-files arn:minio:sqs::ods-minio-parquet:postgresql --event put,delete,get;
       "
     restart: on-failure
-
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -77,20 +96,30 @@ services:
     container_name: airflow
     ports:
       - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy   # ждём, пока postgres станет готов
     volumes:
       - ../airflow/dags:/opt/airflow/dags
       - ../airflow/scripts:/opt/airflow/scripts
       - ../airflow/plugins:/opt/airflow/plugins
+      - ../airflow/configs:/opt/airflow/configs
       - ../airflow/requirements.txt:/opt/airflow/requirements.txt
-      - ../airflow/airflow.db:/opt/airflow/airflow.db
+      # - ../airflow/airflow.db:/opt/airflow/airflow.db   # можно закомментировать, больше не нужен
     environment:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW_USER: ${AIRFLOW_USER}
       AIRFLOW_PASSWORD: ${AIRFLOW_PASSWORD}
       AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_SEC: "600"
       AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT: "1800"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/$airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__PARALLELISM: 32
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 2
     command: >
       bash -c "
+        # Ждём, пока postgres будет доступен (хотя depends_on уже гарантирует, но для уверенности)
+        echo 'Waiting for Postgres...' &&
         airflow db init &&
         pip install --no-cache-dir -r /opt/airflow/requirements.txt &&
         (airflow users list | grep -q ${AIRFLOW_USER} 2>/dev/null || 
@@ -101,6 +130,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:-postgres_data}
   minio_data:
     name: ${MINIO_VOLUME_NAME:-minio_data}
   clickhouse_data:

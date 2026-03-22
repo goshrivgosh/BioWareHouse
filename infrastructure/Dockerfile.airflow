@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libbz2-dev \
     liblzma-dev \
     libcurl4-openssl-dev \
+    openjdk-17-jre-headless \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -25,6 +26,7 @@ COPY airflow/plugins /opt/airflow/plugins
 
 USER airflow
 
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 # Устанавливаем HOWARD и зависимости (от airflow)
 RUN pip install --no-cache-dir /opt/howard
 RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt

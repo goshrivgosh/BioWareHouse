@@ -45,6 +45,7 @@ FROM s3('http://minio:9000/parquet-files/all_chr22_phase3.parquet',
 ![Архитектура хранилища данных](image/BioWareHouse.png)
 
 
+
 Еще один вариант запроса:
 ```sql
 SELECT case

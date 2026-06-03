@@ -61,7 +61,5 @@ WHERE `#CHROM` = '22'
 GROUP BY af_category;
 ```
 Результат:
-![Архитектура хранилища данных](image/af_category.png)
-
 
 

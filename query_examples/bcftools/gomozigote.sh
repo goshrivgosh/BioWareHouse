@@ -1,0 +1,1 @@
+ bcftools query -f '%CHROM\t%POS\t[%GT\t]\n' vcf_files/vcf_gz/ALL.chr21.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz | awk '{hom=1; for(i=3;i<=NF;i++){if($i ~ /\./){hom=0;break}; split($i,a,"[/|]"); if(a[1]!=a[2]){hom=0;break}}; if(hom) print}' | wc -l

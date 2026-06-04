@@ -54,24 +54,32 @@ services:
       
         mc mb minio/raw-vcf-files --ignore-existing;
         mc mb minio/parquet-files --ignore-existing;
+        mc mb minio/iceberg-files --ignore-existing;
         mc mb minio/sandbox --ignore-existing;
       
-        mc admin config set minio notify_postgres:stage-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"stage_vcf_object\" format=\"access\";
-        mc admin config set minio notify_postgres:ods-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"ods_vcf_object\" format=\"namespace\";
+        mc admin config set minio notify_postgres:stage-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=${POSTGRES_DB} port=5432\" table=\"stage_vcf_raw\" format=\"access\";
+        mc admin config set minio notify_postgres:ods-minio-vcf connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=${POSTGRES_DB} port=5432\" table=\"ods_vcf_raw\" format=\"namespace\";
       
-        mc admin config set minio notify_postgres:stage-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"stage_parquet_object\" format=\"access\";
-        mc admin config set minio notify_postgres:ods-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=postgres dbname=${POSTGRES_DB:-airflow} port=5432\" table=\"ods_parquet_object\" format=\"namespace\";
+        mc admin config set minio notify_postgres:stage-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=${POSTGRES_DB} port=5432\" table=\"stage_parquet_raw\" format=\"access\";
+        mc admin config set minio notify_postgres:ods-minio-parquet connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=${POSTGRES_DB} port=5432\" table=\"ods_parquet_raw\" format=\"namespace\";
+      
+        mc admin config set minio notify_postgres:stage-minio-iceberg connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=${POSTGRES_DB} port=5432\" table=\"stage_iceberg_raw\" format=\"access\";
+        mc admin config set minio notify_postgres:ods-minio-iceberg connection_string=\"user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} host=${POSTGRES_HOST} dbname=${POSTGRES_DB} port=5432\" table=\"ods_iceberg_raw\" format=\"namespace\";
       
         mc admin service restart minio;
       
         mc event remove minio/raw-vcf-files --force 2>/dev/null || true;
         mc event remove minio/parquet-files --force 2>/dev/null || true;
+        mc event remove minio/iceberg-files --force 2>/dev/null || true;
       
         mc event add minio/raw-vcf-files arn:minio:sqs::stage-minio-vcf:postgresql --event put,delete,get;
         mc event add minio/raw-vcf-files arn:minio:sqs::ods-minio-vcf:postgresql --event put,delete,get;
       
         mc event add minio/parquet-files arn:minio:sqs::stage-minio-parquet:postgresql --event put,delete,get;
         mc event add minio/parquet-files arn:minio:sqs::ods-minio-parquet:postgresql --event put,delete,get;
+      
+        mc event add minio/iceberg-files arn:minio:sqs::stage-minio-iceberg:postgresql --event put,delete,get;
+        mc event add minio/iceberg-files arn:minio:sqs::ods-minio-iceberg:postgresql --event put,delete,get;
       "
     restart: on-failure
 
